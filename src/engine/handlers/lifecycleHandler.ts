@@ -51,15 +51,16 @@ export function handleStop(cmd: ParsedCommand, state: DockerEngineState): Comman
   const errors: string[] = [];
 
   for (const target of cmd.args) {
-    const container = Object.values(nextState.containers).find(
-      c => c.id === target || c.id.startsWith(target) || c.name === target
+    const entry = Object.entries(nextState.containers).find(
+      ([key, c]) => c.id === target || c.id.startsWith(target) || c.name === target || key === target
     );
 
-    if (!container) {
+    if (!entry) {
       errors.push(`Error response from daemon: No such container: ${target}`);
       continue;
     }
 
+    const [, container] = entry;
     container.status = 'stopped';
     stoppedNames.push(target);
   }
@@ -94,14 +95,16 @@ export function handleRm(cmd: ParsedCommand, state: DockerEngineState): CommandR
   const force = Boolean(cmd.flags['force'] || cmd.flags['f']);
 
   for (const target of cmd.args) {
-    const container = Object.values(nextState.containers).find(
-      c => c.id === target || c.id.startsWith(target) || c.name === target
+    const entry = Object.entries(nextState.containers).find(
+      ([key, c]) => c.id === target || c.id.startsWith(target) || c.name === target || key === target
     );
 
-    if (!container) {
+    if (!entry) {
       errors.push(`Error response from daemon: No such container: ${target}`);
       continue;
     }
+
+    const [containerKey, container] = entry;
 
     if (container.status === 'running' && !force) {
       errors.push(
@@ -119,7 +122,7 @@ export function handleRm(cmd: ParsedCommand, state: DockerEngineState): CommandR
       }
     }
 
-    delete nextState.containers[container.id];
+    delete nextState.containers[containerKey];
     removedNames.push(target);
   }
 

@@ -40,8 +40,9 @@ export const ALL_LEVELS: LevelDefinition[] = [
     recommendedCommand: 'docker stop legacy-app && docker rm legacy-app',
     initialState: (() => {
       const s = createDefaultDockerState();
-      s.containers['cnt-legacy'] = {
-        id: 'c1e9a8f27301',
+      const legacyId = 'c1e9a8f27301';
+      s.containers[legacyId] = {
+        id: legacyId,
         name: 'legacy-app',
         imageId: 'img-nginx-latest',
         status: 'running',

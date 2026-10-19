@@ -151,18 +151,18 @@ export function parseCommand(rawInput: string): ParseResult {
       const shortFlags = token.slice(1);
       
       // 만약 -p 8080:80 처럼 단일 짧은 플래그가 값을 취하는 경우
-      if (shortFlags.length === 1 && isValuedShortFlag(shortFlags)) {
+      if (shortFlags.length === 1 && isValuedShortFlag(shortFlags, normalizedSubcommand)) {
         if (index + 1 < tokens.length && !tokens[index + 1].startsWith('-')) {
-          addNormalizedShortFlag(flags, shortFlags, tokens[index + 1]);
+          addNormalizedShortFlag(flags, shortFlags, tokens[index + 1], normalizedSubcommand);
           index++;
         } else {
-          addNormalizedShortFlag(flags, shortFlags, true);
+          addNormalizedShortFlag(flags, shortFlags, true, normalizedSubcommand);
         }
       } else {
-        // 복합 불리언 플래그 (예: -d, -a, -q)
+        // 복합 불리언 플래그 (예: -d, -a, -q, -f)
         for (let j = 0; j < shortFlags.length; j++) {
           const sf = shortFlags[j];
-          addNormalizedShortFlag(flags, sf, true);
+          addNormalizedShortFlag(flags, sf, true, normalizedSubcommand);
         }
       }
     } else {
@@ -188,18 +188,21 @@ function isValuedFlag(flag: string): boolean {
   return ['publish', 'volume', 'name', 'network', 'env', 'tag', 'file'].includes(flag);
 }
 
-function isValuedShortFlag(shortFlag: string): boolean {
-  return ['p', 'v', 'e', 't', 'f'].includes(shortFlag);
+function isValuedShortFlag(shortFlag: string, subcommand?: string): boolean {
+  if (shortFlag === 'f') {
+    return subcommand === 'build';
+  }
+  return ['p', 'v', 'e', 't'].includes(shortFlag);
 }
 
-function addNormalizedShortFlag(flags: Record<string, any>, sf: string, val: any) {
+function addNormalizedShortFlag(flags: Record<string, any>, sf: string, val: any, subcommand?: string) {
   const map: Record<string, string> = {
     d: 'detach',
     p: 'publish',
     v: 'volume',
     e: 'env',
     t: 'tag',
-    f: 'file',
+    f: subcommand === 'rm' ? 'force' : 'file',
     a: 'all',
     q: 'quiet',
   };

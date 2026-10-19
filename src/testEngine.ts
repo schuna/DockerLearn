@@ -54,6 +54,21 @@ assert(redoRes.success, 'redo succeeded');
 state = engine.getState();
 assert(state.containers[webContainer!.id].status === 'stopped', 'my-web status redone to stopped');
 
+// 6.1. docker rm
+console.log('\n[Test 5.1] docker rm my-web');
+const rmRes = engine.execute('docker rm my-web');
+assert(rmRes.success, 'docker rm succeeded');
+state = engine.getState();
+assert(!state.containers[webContainer!.id], 'my-web is completely removed from containers');
+
+// 6.2. docker rm -f running container
+console.log('\n[Test 5.2] docker run & docker rm -f');
+engine.execute('docker run -d --name test-force nginx');
+const forceRmRes = engine.execute('docker rm -f test-force');
+assert(forceRmRes.success, 'docker rm -f succeeded');
+state = engine.getState();
+assert(!Object.values(state.containers).some(c => c.name === 'test-force'), 'test-force container removed');
+
 // 7. docker volume
 console.log('\n[Test 6] docker volume create my-vol');
 const volRes = engine.execute('docker volume create my-vol');
