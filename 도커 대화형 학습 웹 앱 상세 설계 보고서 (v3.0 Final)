@@ -1,0 +1,280 @@
+# 도커 대화형 학습 웹 앱 상세 설계 보고서 (v3.0 Final)
+**Learn Git Branching 벤치마킹 기반 클라이언트 가상 엔진 및 반응형 시각화 아키텍처**
+
+---
+
+## 1. 개요 및 목적 (Overview & Goals)
+본 문서는 브라우저 환경에서 도커(Docker)의 핵심 개념과 CLI 명령어를 직관적으로 학습할 수 있는 인터랙티브 웹 애플리케이션의 개발 사양서입니다. 백엔드 서버 없이 브라우저 단독으로 실행되는 **순수 인메모리 가상 엔진(Pure In-Memory Virtual Engine)**과 **React Flow 기반 노드-연결선 그래프**를 결합하여, 실시간 시각적 피드백과 단계별 미션 해결 환경을 제공합니다.
+
+---
+
+## 2. 8대 핵심 아키텍처 의사결정 요약 (Key Architecture Decisions)
+
+| 영역 | 채택 사양 | 핵심 세부 구현 기준 |
+| :--- | :--- | :--- |
+| **Q1. CLI 파서 스코프** | **화이트리스트 기반 정규화** | 필수 플래그만 엄격 파싱, 미지원 쉘 문법(파이프 등) 시 가이드 메시지 반환 |
+| **Q2. 되돌리기(Undo)** | **상태 스냅샷 스택 타임머신** | 불변 상태 스택(최대 20개) 기반 `undo` 명령 및 UI 롤백 지원 |
+| **Q3. 가상 파일 시스템** | **내장 탭 에디터(Tabbed Editor)** | 터미널 연동 탭 에디터 제공 (`Dockerfile`, `compose.yaml` 직접 수정 및 빌드) |
+| **Q4. 렌더러 기술 스택** | **React Flow 라이브러리** | 커스텀 HTML 노드(상태 펄스, 포트 칩) 및 베지어 곡선 패킷 애니메이션 적용 |
+| **Q5. 반응형 / 뷰포트** | **데스크톱 최적화 + 가로모드 권장** | 데스크톱 Split-View 우선, 모바일 세로 진입 시 가로 모드 회전 안내 오버레이 |
+| **Q6. 영속성 및 저장소** | **진행도 localStorage + 레벨 격리** | 클리어 진척도는 영구 저장, 엔진 상태는 레벨 진입 시 클린 샌드박스로 초기화 |
+| **Q7. 정답 검증 정책** | **부분 일치 허용 (Subset Matching)** | 필수 목표 속성 충족 시 통과, 부가적인 무해 옵션(환경변수 등) 허용 |
+| **Q8. 렌더링 애니메이션** | **비동기 스텝 애니메이션 큐** | 빌드 레이어 적층 및 컨테이너 기동 과정을 300~500ms 간격 순차 렌더링 |
+
+---
+
+## 3. 가상 도커 엔진 데이터 구조 (TypeScript State Schema)
+
+도커 엔진 상태는 불변 객체(Immutable Object)로 관리되며, 모든 상태 변이는 딥 카피(Deep Copy)를 통해 수행됩니다.
+
+```typescript
+// 전체 엔진 루트 상태 인터페이스
+export interface DockerEngineState {
+  images: Record<string, ImageState>;          // 로컬 이미지 저장소 (Image ID 기준)
+  containers: Record<string, ContainerState>;  // 컨테이너 풀 (Container ID 기준)
+  volumes: Record<string, VolumeState>;        // 영구 볼륨 풀 (Volume Name 기준)
+  networks: Record<string, NetworkState>;      // 가상 네트워크 풀 (Network Name 기준)
+  buildContext: Record<string, string>;        // 가상 파일 시스템 (Dockerfile, compose.yaml)
+}
+
+// 1. 이미지 및 레이어 상태
+export interface ImageState {
+  id: string;                     // e.g., "img-nginx-latest"
+  repository: string;             // e.g., "nginx"
+  tag: string;                    // e.g., "latest"
+  size: string;                   // e.g., "142MB"
+  layers: string[];               // 레이어 명령어 스택
+  createdAt: string;
+}
+
+// 2. 컨테이너 상태
+export interface ContainerState {
+  id: string;                     // e.g., "cnt-web-01"
+  name: string;                   // e.g., "my-web"
+  imageId: string;                // 참조하는 Image ID
+  status: 'running' | 'stopped' | 'exited';
+  ports: PortBinding[];           // 포트 바인딩 목록
+  env: Record<string, string>;    // 환경 변수 맵
+  volumeMounts: VolumeMount[];    // 볼륨 마운트 목록
+  networkNames: string[];         // 소속된 네트워크 목록
+  createdAt: string;
+}
+
+export interface PortBinding {
+  hostPort: number;               // 호스트 노출 포트 (e.g., 8080)
+  containerPort: number;          // 컨테이너 내부 포트 (e.g., 80)
+  protocol: 'tcp' | 'udp';
+}
+
+export interface VolumeMount {
+  volumeName: string;             // 대상 볼륨 이름
+  containerPath: string;          // 컨테이너 마운트 경로
+  mode: 'rw' | 'ro';
+}
+
+// 3. 볼륨 상태
+export interface VolumeState {
+  name: string;
+  driver: 'local';
+  data: Record<string, string>;   // 가상 영구 데이터 블록
+  createdAt: string;
+}
+
+// 4. 네트워크 상태
+export interface NetworkState {
+  name: string;                   // e.g., "bridge", "app-net"
+  driver: 'bridge' | 'host' | 'none';
+  subnet: string;                 // e.g., "172.18.0.0/16"
+  connectedContainerIds: string[];// 연결된 컨테이너 ID 배열
+}
+
+// 5. 스냅샷 타임머신 히스토리 인터페이스
+export interface StateHistoryManager {
+  past: DockerEngineState[];      // Undo용 이전 상태 스택 (최대 20개)
+  present: DockerEngineState;     // 현재 활성 상태
+  future: DockerEngineState[];    // Redo용 상태 스택
+}
+```
+
+---
+
+## 4. 가상 명령어 디스패처 및 파서 사양 (Dispatcher Specification)
+
+### 4.1 파이프라인 흐름
+$$\text{CLI Input} \xrightarrow{\text{Lexer/Parser}} \text{Token Normalize} \xrightarrow{\text{Dispatcher}} \text{Handler Mutator} \xrightarrow{\text{Push Snapshot}} \text{Async Animation Queue} \xrightarrow{\text{Evaluator}}$$
+
+### 4.2 파서 규칙 및 화이트리스트
+* **화이트리스트 지원 명령어:** `docker run`, `docker ps`, `docker stop`, `docker rm`, `docker images`, `docker build`, `docker volume`, `docker network`, `docker compose`, `undo`, `clear`, `help`
+* **지원 플래그:** `-d`, `--detach`, `-p`, `--publish`, `-v`, `--volume`, `--name`, `--network`, `-e`, `-t`, `-f`, `-a`, `--all`
+* **미지원 문법 처리:** 파이프(`|`), 백그라운드 연산자(`&`), 리다이렉션(`>`, `<`) 감지 시 에러 반환:
+  > *"가상 학습 터미널에서는 복합 쉘 문법 대신 표준 단일 도커 명령어 실행을 권장합니다."*
+
+### 4.3 `undo` 명령 및 스냅샷 복원 로직
+```typescript
+public handleUndo(history: StateHistoryManager): CommandResult {
+  if (history.past.length === 0) {
+    return {
+      success: false,
+      stdout: '',
+      stderr: '되돌릴 이전 작업 내역이 없습니다.',
+      nextState: history.present
+    };
+  }
+  const previousState = history.past.pop()!;
+  history.future.push(cloneState(history.present));
+  history.present = previousState;
+
+  return {
+    success: true,
+    stdout: '직전 상태로 성공적으로 되돌렸습니다. (Undo complete)',
+    stderr: '',
+    nextState: previousState
+  };
+}
+```
+
+---
+
+## 5. UI/UX 및 시각화 렌더러 사양 (Visual & UI Layout)
+
+### 5.1 레이아웃 구조 (Split-Screen)
+* **데스크톱 (기본 권장):** 좌/우 또는 상/하 50:50 분할 패널.
+  * **좌/상단:** React Flow 기반 노드-연결선 인터랙티브 캔버스 (Zoom, Pan, Fit View 지원).
+  * **우/하단:** 탭 뷰 (Tab 1: 가상 Bash CLI 터미널, Tab 2: Dockerfile/Compose 파일 에디터).
+* **모바일 뷰포트 대응:** 
+  * 화면 폭 768px 미만 세로 모드 진입 시 **'가로 모드(Landscape) 권장' 가이드 오버레이** 노출.
+  * 회전 시 상하 4:6 비율로 터미널과 미니 캔버스가 동시 배치되는 레이아웃 적용.
+
+### 5.2 React Flow 커스텀 노드 및 연결선 설계
+1. **ContainerNode:**
+   * 상태별 시각 효과: `running` (에메랄드 펄스 애니메이션), `stopped` (회색 블러 및 Exited 뱃지).
+   * 포트 바인딩 칩(`8080:80`) 및 볼륨 연결 링크 앵커 제공.
+2. **ImageStackNode:**
+   * Dockerfile 명령어 줄 단위로 적층된 수직 스택 시각화.
+3. **VolumeNode & NetworkBoundary:**
+   * 독립 데이터 디스크 블록 아이콘.
+   * 사용자 정의 네트워크는 점선 바운더리 박스로 감싸 동일 네트워크 내 컨테이너를 시각적으로 그룹화.
+4. **ConnectorLink (Animated Edge):**
+   * 포트 트래픽 및 볼륨 데이터 흐름을 베지어 곡선 상의 발광 파티클 애니메이션으로 표현.
+
+### 5.3 비동기 스텝 애니메이션 큐
+* `docker build` 실행 시: 각 Step(`Step 1/4 : FROM ...`)마다 400ms 지연 후 레이어 적층 애니메이션 실행.
+* `docker compose up` 실행 시: 의존성 순서(`depends_on`)에 따라 300ms 간격으로 컨테이너 노드가 순차 생성.
+
+---
+
+## 6. 정답 검증 엔진 (Evaluation Engine Specification)
+
+### 6.1 부분 일치 기반 검증 원칙 (Subset Matching)
+검증기는 사용자가 입력한 명령어 문자열이 아니라, 명령어 실행 후 생성된 `DockerEngineState`의 특정 속성 존재 여부만 검사합니다.
+
+### 6.2 1-1 ~ 2-2 레벨 검증 알고리즘 명세 예시
+
+```typescript
+// 레벨 1-1 검증기: 첫 번째 웹 서버 컨테이너 실행
+export function evaluateLevel1_1(state: DockerEngineState): EvaluationResult {
+  const containers = Object.values(state.containers);
+  if (containers.length === 0) {
+    return { passed: false, message: '아직 실행된 컨테이너가 없습니다.', hint: '`docker run`을 실행해 보세요.' };
+  }
+
+  // 1. nginx 이미지 기반 컨테이너 검색
+  const nginxContainer = containers.find(c => {
+    const img = state.images[c.imageId];
+    return img && img.repository === 'nginx';
+  });
+  if (!nginxContainer) {
+    return { passed: false, message: 'nginx 이미지 기반 컨테이너가 없습니다.', hint: '`docker run ... nginx` 형태로 이미지를 지정하세요.' };
+  }
+
+  // 2. 실행 상태 검사
+  if (nginxContainer.status !== 'running') {
+    return { passed: false, message: '컨테이너가 실행 중이 아닙니다.', hint: '백그라운드 실행 옵션 `-d`를 확인하세요.' };
+  }
+
+  // 3. 포트 바인딩 검사 (부분 일치: 다른 포트가 추가되어도 8080:80이 있으면 통과)
+  const hasPort = nginxContainer.ports.some(p => p.hostPort === 8080 && p.containerPort === 80);
+  if (!hasPort) {
+    return { passed: false, message: '호스트 8080 포트가 컨테이너 80 포트에 바인딩되지 않았습니다.', hint: '`-p 8080:80` 플래그를 점검하세요.' };
+  }
+
+  // 4. 컨테이너 이름 검사
+  if (nginxContainer.name !== 'my-web') {
+    return { passed: false, message: `컨테이너 이름이 '${nginxContainer.name}'입니다. 'my-web'으로 지정해야 합니다.`, hint: '`--name my-web` 옵션을 추가하세요.' };
+  }
+
+  return { passed: true, message: '🎉 축하합니다! 첫 번째 웹 서버 컨테이너를 올바르게 실행했습니다!' };
+}
+
+// 레벨 2-1 검증기: 볼륨 마운트 데이터 지속성
+export function evaluateLevel2_1(state: DockerEngineState): EvaluationResult {
+  const hasVolume = Boolean(state.volumes['my-db-data']);
+  if (!hasVolume) {
+    return { passed: false, message: 'my-db-data 볼륨이 생성되지 않았습니다.', hint: '`docker volume create my-db-data`를 먼저 실행하세요.' };
+  }
+
+  const containerWithVolume = Object.values(state.containers).find(c =>
+    c.volumeMounts.some(v => v.volumeName === 'my-db-data' && v.containerPath === '/var/lib/mysql')
+  );
+
+  if (!containerWithVolume) {
+    return { passed: false, message: 'my-db-data 볼륨이 /var/lib/mysql 경로에 마운트된 컨테이너가 없습니다.', hint: '`-v my-db-data:/var/lib/mysql` 옵션을 부여하세요.' };
+  }
+
+  return { passed: true, message: '🎉 영구 볼륨 연결에 성공했습니다! 컨테이너가 재시작되어도 데이터가 보존됩니다.' };
+}
+```
+
+---
+
+## 7. 스토리지 및 진행 상태 관리 (Persistence Policy)
+
+```typescript
+export interface UserProgressStorage {
+  completedLevels: string[];          // 클리어한 레벨 키 배열 (e.g., ['1-1', '1-2'])
+  commandHistory: string[];           // 터미널 방향키 탐색용 커맨드 히스토리
+  lastActiveLevel: string;            // 마지막 접근 레벨
+}
+
+// 로컬 스토리지 키 명세
+export const STORAGE_KEY_PROGRESS = 'DOCKER_LEARNING_PROGRESS_V3';
+
+// 레벨 전환 처리 원칙:
+// 1. 레벨 전환 시 이전 레벨의 찌꺼기 컨테이너/네트워크는 리셋되고, 새 레벨의 기본 인메모리 상태(defaultInitialState)로 샌드박싱 시작
+// 2. 사용자의 클리어 달성 상태는 localStorage에 즉시 커밋되어 브라우저를 닫아도 보존됨
+```
+
+---
+
+## 8. 3단계 전체 커리큘럼 로드맵 명세
+
+```
+🟢 1단계: 초보 (Beginner)
+├── 1-1. 첫 컨테이너 실행 및 포트 바인딩 (docker run -d -p 8080:80 --name my-web nginx)
+├── 1-2. 라이프사이클 제어 및 정리 (docker stop, docker rm, docker ps -a)
+└── 1-3. Dockerfile 작성과 이미지 빌드 (탭 에디터 활용, docker build -t my-app .)
+
+🟡 2단계: 중급 (Intermediate)
+├── 2-1. 볼륨 마운트와 데이터 지속성 (docker volume create, -v my-data:/data)
+├── 2-2. 사용자 정의 브리지 네트워크와 격리 (docker network create app-net, --network)
+└── 2-3. Docker Compose 다중 컨테이너 배포 (compose.yaml 작성 후 docker compose up -d)
+
+🔴 3단계: 고급 (Advanced)
+├── 3-1. Multi-stage build를 통한 이미지 슬리밍 (빌드 아티팩트 분리 및 최종 용량 비교)
+├── 3-2. 빌드 캐시 최적화 및 레이어 순서 설계 (자주 바뀌는 COPY 명령어를 하단 배치)
+└── 3-3. 보안 베스트 프랙티스 (Alpine 경량 베이스 이미지 + USER 비-root 계정 설정)
+```
+
+---
+
+## 9. 개발팀 구현 작업 순서 가이드 (Action Items for Engineering)
+
+1. **Sprint 1 (코어 엔진 & CLI 정규화):**
+   * 불변 `DockerEngineState` 스키마 및 `StateHistoryManager` (Undo 타임머신 스택) 구현.
+   * `VirtualCommandDispatcher` 정규화 파서 및 화이트리스트 에러 핸들러 구축.
+2. **Sprint 2 (React Flow 캔버스 연동):**
+   * React Flow 커스텀 노드 4종(`Container`, `Image`, `Volume`, `Network`) 구현.
+   * 비동기 스텝 애니메이션 큐(빌드 레이어 및 컨테이너 단계적 기동) 렌더링 연결.
+3. **Sprint 3 (에디터 탭 및 검증기 완성):**
+   * 상하/좌우 분할 스플릿 뷰 및 내장 파일 에디터 패널 구현.
+   * 부분 일치 검증기(`evaluateLevel1_1` ~ `evaluateLevel3_3`) 및 `localStorage` 진행도 동기화.
