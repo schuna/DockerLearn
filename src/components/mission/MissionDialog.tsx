@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { LevelDefinition } from '../../types/level';
-import { X, Play, Lightbulb, CheckCircle2 } from 'lucide-react';
+import { X, Play, Lightbulb, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 export interface MissionDialogProps {
   level: LevelDefinition;
@@ -15,6 +15,12 @@ export const MissionDialog: React.FC<MissionDialogProps> = ({
   onClose,
   onRunRecommendedCommand,
 }) => {
+  const [showHint, setShowHint] = useState<boolean>(false);
+
+  useEffect(() => {
+    setShowHint(false);
+  }, [level.id]);
+
   if (!isOpen) return null;
 
   const stageBadgeColor =
@@ -64,30 +70,47 @@ export const MissionDialog: React.FC<MissionDialogProps> = ({
           </div>
         </div>
 
-        {/* Recommended Command */}
+        {/* Recommended Command - Hidden by default behind toggle */}
         {level.recommendedCommand && (
           <div className="mb-6">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
-              <Lightbulb className="w-4 h-4 text-amber-400" />
-              <span>추천 실행 명령어</span>
-            </h3>
-            <div className="flex items-center justify-between p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
-              <code className="text-xs font-mono text-sky-400 truncate pr-2">
-                {level.recommendedCommand}
-              </code>
-              {onRunRecommendedCommand && (
-                <button
-                  onClick={() => {
-                    onRunRecommendedCommand(level.recommendedCommand!);
-                    onClose();
-                  }}
-                  className="flex items-center space-x-1 px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium shrink-0 transition"
-                >
-                  <Play className="w-3 h-3 fill-white" />
-                  <span>바로 실행</span>
-                </button>
-              )}
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+                <Lightbulb className="w-4 h-4 text-amber-400" />
+                <span>추천 실행 명령어</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowHint(!showHint)}
+                className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-medium transition border border-slate-700"
+              >
+                {showHint ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                <span>{showHint ? '힌트 숨기기' : '힌트 보기'}</span>
+              </button>
             </div>
+
+            {showHint ? (
+              <div className="flex items-center justify-between p-2.5 bg-slate-950 border border-amber-500/40 rounded-xl animate-in fade-in duration-200">
+                <code className="text-xs font-mono text-sky-400 truncate pr-2">
+                  {level.recommendedCommand}
+                </code>
+                {onRunRecommendedCommand && (
+                  <button
+                    onClick={() => {
+                      onRunRecommendedCommand(level.recommendedCommand!);
+                      onClose();
+                    }}
+                    className="flex items-center space-x-1 px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium shrink-0 transition"
+                  >
+                    <Play className="w-3 h-3 fill-white" />
+                    <span>바로 실행</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="p-3 bg-slate-950/40 border border-dashed border-slate-800 rounded-xl text-xs text-slate-500 text-center">
+                '힌트 보기' 버튼을 누르면 추천 실행 명령어를 확인할 수 있습니다.
+              </div>
+            )}
           </div>
         )}
 
@@ -97,7 +120,7 @@ export const MissionDialog: React.FC<MissionDialogProps> = ({
             onClick={onClose}
             className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
           >
-            확인 및 학습 시작
+            확인 및 학습 계속하기
           </button>
         </div>
       </div>

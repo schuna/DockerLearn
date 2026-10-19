@@ -88,7 +88,6 @@ export default function App() {
         `--- 레벨 전환: [${targetLevel.id}] ${targetLevel.title} ---`,
         `목표: ${targetLevel.goal}`,
       ]);
-      setIsDialogOpen(true);
     }
   };
 
@@ -240,6 +239,10 @@ export default function App() {
             onOpenDialog={() => setIsDialogOpen(true)}
             onNextLevel={handleNextLevel}
             hasNextLevel={currentLevelIndex < ALL_LEVELS.length - 1}
+            onRunHintCommand={cmd => {
+              setActiveTab('terminal');
+              handleExecute(cmd);
+            }}
           />
 
           <DockerCanvas
