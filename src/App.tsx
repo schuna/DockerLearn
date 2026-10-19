@@ -7,9 +7,11 @@ import { VirtualTerminal } from './components/terminal/VirtualTerminal';
 import { TabbedEditor } from './components/editor/TabbedEditor';
 import { MissionBanner } from './components/mission/MissionBanner';
 import { MissionDialog } from './components/mission/MissionDialog';
+import { MobileLandscapeOverlay } from './components/layout/MobileLandscapeOverlay';
 import { ALL_LEVELS } from './levels';
 import { EvaluationResult, STORAGE_KEY_PROGRESS, UserProgressStorage } from './types/level';
-import { Terminal, FileCode } from 'lucide-react';
+import { fireConfetti } from './utils/confetti';
+import { Terminal, FileCode, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   // 로컬 스토리지에서 진행도 불러오기
@@ -26,15 +28,28 @@ export default function App() {
     return [];
   });
 
-  const [currentLevelIndex, setCurrentLevelIndex] = useState<number>(0);
+  const [currentLevelIndex, setCurrentLevelIndex] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PROGRESS);
+      if (saved) {
+        const parsed: UserProgressStorage = JSON.parse(saved);
+        const idx = ALL_LEVELS.findIndex(l => l.id === parsed.lastActiveLevel);
+        if (idx !== -1) return idx;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return 0;
+  });
+
   const currentLevel = ALL_LEVELS[currentLevelIndex] || ALL_LEVELS[0];
 
   const [engine] = useState(() => new VirtualDockerEngine(currentLevel.initialState));
   const [state, setState] = useState(() => engine.getState());
   const [logs, setLogs] = useState<string[]>([
-    'DockerLearn v3.0 (Interactive Learning System)',
-    `미션 ${currentLevel.id}: ${currentLevel.title}`,
-    '하단 터미널 또는 [에디터] 탭에서 학습을 시작하세요.',
+    'DockerLearn v3.0 Final (Interactive Learning Simulator)',
+    `현재 미션: [${currentLevel.id}] ${currentLevel.title}`,
+    '하단 터미널에서 명령어를 입력하거나 [에디터] 탭에서 Dockerfile을 수정하여 시작하세요.',
   ]);
 
   const [activeTab, setActiveTab] = useState<'terminal' | 'editor'>('terminal');
@@ -46,7 +61,7 @@ export default function App() {
 
   const animQueueRef = useRef(new AnimationQueueManager());
 
-  // 진행도 localStorage 저장
+  // 진행도 localStorage 영속화
   useEffect(() => {
     try {
       const data: UserProgressStorage = {
@@ -71,7 +86,7 @@ export default function App() {
       setLastEvaluation(undefined);
       setLogs([
         `--- 레벨 전환: [${targetLevel.id}] ${targetLevel.title} ---`,
-        targetLevel.goal,
+        `목표: ${targetLevel.goal}`,
       ]);
       setIsDialogOpen(true);
     }
@@ -134,13 +149,14 @@ export default function App() {
     setLogs(currentLogs);
     setState(finalState);
 
-    // 미션 부분 일치(Subset Matching) 검증 실행
+    // 부분 일치(Subset Matching) 검증 실행
     const evalResult = currentLevel.evaluate(finalState);
     setLastEvaluation(evalResult);
 
     if (evalResult.passed) {
       if (!completedLevels.includes(currentLevel.id)) {
         setCompletedLevels(prev => [...prev, currentLevel.id]);
+        fireConfetti(); // 축하 폭죽 효과!
       }
       setLogs(prev => [...prev, `🎉 ${evalResult.message}`]);
     }
@@ -185,8 +201,13 @@ export default function App() {
     handleExecute(cmd);
   };
 
+  const isAllCompleted = completedLevels.length === ALL_LEVELS.length;
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 font-sans select-none overflow-hidden">
+      {/* Mobile Landscape Guide Overlay */}
+      <MobileLandscapeOverlay />
+
       {/* Top Header */}
       <Header
         levels={ALL_LEVELS}
@@ -200,6 +221,14 @@ export default function App() {
         canUndo={true}
         canRedo={true}
       />
+
+      {/* All Completed Celebration Notice */}
+      {isAllCompleted && (
+        <div className="bg-gradient-to-r from-emerald-600 to-sky-600 text-white text-xs py-1.5 px-4 text-center font-medium shadow-md flex items-center justify-center space-x-2 shrink-0">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>축하합니다! 3단계 총 9개 도커 인터랙티브 학습 미션을 모두 완료하셨습니다! 🏆</span>
+        </div>
+      )}
 
       {/* Main Split Layout */}
       <div className="flex-1 flex overflow-hidden">
